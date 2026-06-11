@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>𝙎𝐲ɱб𝓸𝖑 𝚁ɐ𝕚ɴ</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, #000000, #130076); /* 網頁載入時背景是漸層 */
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: sans-serif;
+        }
+
+        /* 白底圓角按鈕，文字：『purple rain』，字級18級 */
+        #start-btn {
+            background-color: #ffffff;
+            color: #000000;
+            font-size: 18px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 310px;
+            cursor: pointer;
+            z-index: 10;
+            position: absolute;
+            transition: transform 0.2s, opacity 0.2s;
+            box-shadow: 0 4px 15px rgba(255, 255, 255, 0.2);
+        }
+
+        #start-btn:hover {
+            transform: scale(1.05);
+        }
+
+        #start-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* 隱藏原生影片元素，我們將其繪製到 Canvas 上 */
+        #webcam {
+            display: none;
+        }
+    </style>
+    <!-- 引入 TensorFlow.js 與 Blazeface 臉部辨識模型 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+</head>
+<body>
+
+    <button id="start-btn">＄☺〷☄₰☂</button>
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const btn = document.getElementById('start-btn');
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let model = null;
+        let raindrops = [];
+        let faceBoxes = [];
+        let isDetecting = false;
+        let showVideo = true; // 新增變數：控制是否顯示攝影機畫面
+        
+        // 用來計算影片填滿畫面的比例與偏移量
+        let drawInfo = { drawWidth: 0, drawHeight: 0, offsetX: 0, offsetY: 0 };
+
+        // 隨機產生一個初始色相偏移值，確保每次網頁載入時的起始顏色都不同
+        const hueOffset = Math.random() * 360;
+
+        // 綁定按鈕點擊事件
+        btn.addEventListener('click', startExperience);
+
+        // 新增點擊畫面的事件監聽器，切換攝影機畫面顯示狀態
+        canvas.addEventListener('click', () => {
+            showVideo = !showVideo;
+        });
+
+        async function startExperience() {
+            btn.disabled = true;
+            btn.innerText = 'loading...';
+
+            try {
+                // 1. 載入 Blazeface 模型
+                await tf.setBackend('webgl'); // 使用 WebGL 加速
+                model = await blazeface.load();
+
+                btn.innerText = 'initializing...';
+
+                // 2. 取得前鏡頭權限
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+
+                // 3. 影片準備好後開始動畫循環
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resizeCanvas();
+                    window.addEventListener('resize', resizeCanvas);
+
+                    btn.style.display = 'none'; // 隱藏按鈕
+                    requestAnimationFrame(loop); // 開始繪製與運算
+                };
+            } catch (err) {
+                console.error("載入或權限取得失敗:", err);
+                btn.innerText = 'camera permission Please!';
+                btn.disabled = false;
+            }
+        }
+
+        // 處理視窗大小改變與影片填滿 Canvas 的計算
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            if (!video.videoWidth) return;
+            const videoRatio = video.videoWidth / video.videoHeight;
+            const canvasRatio = canvas.width / canvas.height;
+
+            if (canvasRatio > videoRatio) {
+                drawInfo.drawWidth = canvas.width;
+                drawInfo.drawHeight = canvas.width / videoRatio;
+                drawInfo.offsetX = 0;
+                drawInfo.offsetY = (canvas.height - drawInfo.drawHeight) / 2;
+            } else {
+                drawInfo.drawHeight = canvas.height;
+                drawInfo.drawWidth = canvas.height * videoRatio;
+                drawInfo.offsetX = (canvas.width - drawInfo.drawWidth) / 2;
+                drawInfo.offsetY = 0;
+            }
+        }
+
+        // 非同步偵測臉部位置
+        async function detectFaces() {
+            if (isDetecting || !model || video.readyState < 2) return;
+            isDetecting = true;
+            try {
+                const predictions = await model.estimateFaces(video, false);
+                
+                // 轉換座標至 Canvas (包含水平翻轉的修正)
+                faceBoxes = predictions.map(pred => {
+                    const tl = pred.topLeft;
+                    const br = pred.bottomRight;
+
+                    const vX = tl[0];
+                    const vY = tl[1];
+                    const vW = br[0] - tl[0];
+                    const vH = br[1] - tl[1];
+
+                    // 將影像座標映射到 Canvas 座標
+                    const cX_unflipped = (vX / video.videoWidth) * drawInfo.drawWidth + drawInfo.offsetX;
+                    const cW = (vW / video.videoWidth) * drawInfo.drawWidth;
+                    
+                    // 因為影片作了水平鏡像翻轉，所以 X 軸需要反轉
+                    const cX_flipped = canvas.width - (cX_unflipped + cW); 
+                    
+                    const cY = (vY / video.videoHeight) * drawInfo.drawHeight + drawInfo.offsetY;
+                    const cH = (vH / video.videoHeight) * drawInfo.drawHeight;
+
+                    // 建立臉部的橢圓碰撞範圍 (稍微往上偏移來對準使用者的頭頂範圍)
+                    return {
+                        cx: cX_flipped + cW / 2,
+                        cy: cY + cH / 2 - cH * 0.15,
+                        rx: cW * 0.55,  // 半徑 X
+                        ry: cH * 0.65   // 半徑 Y
+                    };
+                });
+            } catch(e) {
+                console.error("臉部偵測錯誤:", e);
+            }
+            isDetecting = false;
+        }
+
+        // 定義會落下來的隨機符號庫
+        const symbolList = "✷★☆✦✧✪✫✬⁂⁑✤✱✲✶✸✹❂❊©✺™℗♯ϟ㏎㎏☨⊹❖〥•；！❜☀❄〶⌽∷＠⋮／‰⌇≋◊┋☢㊝㊰㊭㊥㊡ㅇ⅓∵＃☯〷♆】♥♡ø➤ღ＆✡〲∂〣";
+
+        // 彩色循環雨滴(符號)類別
+        class Raindrop {
+            constructor() {
+                // 在畫面最上方 y = 0 附近，隨機的 x 座標開始往下墜落
+                this.x = Math.random() * canvas.width;
+                this.y = -80; // 將初始高度稍微往上調，避免大符號突然在畫面頂端出現
+                this.size = Math.random() * 30 + 20; // 隨機字體大小 20~50px
+                this.symbol = symbolList.charAt(Math.floor(Math.random() * symbolList.length)); // 隨機挑選一個符號
+                this.speedY = Math.random() * 4 + 3; // 隨機初始下墜速度
+                
+                // 每個符號都會有一點點的方向偏移 (非直直落下)
+                this.speedX = (Math.random() - 0.5) * 1.5; 
+
+                // 自轉角度設定
+                this.angle = Math.random() * Math.PI * 2; // 初始隨機角度
+                this.rotationSpeed = (Math.random() - 0.5) * 0.05; // 落下時的些微自轉速度
+                
+                // 根據「生成當下」的全域時間計算色相 (15000毫秒完成 360 度循環)
+                // 加上 hueOffset 確保每次重新整理網頁時起始顏色不同
+                const currentGlobalHue = ((performance.now() / 15000 * 360) + hueOffset) % 360;
+                this.color = `hsl(${Math.floor(currentGlobalHue)}, 100%, 55%)`; 
+                
+                this.isBouncing = false; // 是否已發生碰撞
+            }
+
+            update() {
+                // 更新旋轉角度
+                this.angle += this.rotationSpeed;
+
+                // 讓墜落速度加上隨機的快慢變化，但變化幅度很小以保持平滑
+                if (!this.isBouncing) {
+                    this.speedY += (Math.random() - 0.5) * 0.1;
+                    // 限制最大與最小速度，避免太快或停滯
+                    if (this.speedY > 8) this.speedY = 8;
+                    if (this.speedY < 2) this.speedY = 2;
+                }
+
+                this.x += this.speedX;
+                this.y += this.speedY;
+
+                if (this.isBouncing) {
+                    this.speedY += 0.3; // 碰撞後加上重力加速度
+                }
+
+                // 細線碰到使用者臉部的範圍時會發生碰撞
+                if (!this.isBouncing) {
+                    for (let i = 0; i < faceBoxes.length; i++) {
+                        const box = faceBoxes[i];
+                        const dx = this.x - box.cx;
+                        const dy = this.y - box.cy;
+
+                        // 判斷是否碰到頭部上半圓的橢圓區域
+                        if (dy < 0) {
+                            // 橢圓方程式的距離計算
+                            const distanceSquared = (dx * dx) / (box.rx * box.rx) + (dy * dy) / (box.ry * box.ry);
+                            if (distanceSquared <= 1) {
+                                this.isBouncing = true;
+                                this.speedY = -(this.speedY * (Math.random() * 0.3 + 0.2)); // 稍微往上彈
+                                
+                                // 依據落在左側或右側，決定往外彈開的方向
+                                this.speedX = (dx > 0 ? 1 : -1) * (Math.random() * 3 + 1); 
+
+                                // 碰撞後產生較明顯的自轉效果
+                                this.rotationSpeed = (Math.random() - 0.5) * 0.4;
+                                
+                                // 將雨滴稍微往外移一點，避免卡在碰撞體內
+                                this.y = box.cy - box.ry * Math.sqrt(Math.max(0, 1 - (dx*dx)/(box.rx*box.rx))) - 2;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            draw() {
+                // 繪製隨機符號，取代原本的線條，並加入旋轉效果
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                
+                ctx.fillStyle = this.color;
+                ctx.font = `${this.size}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                // 因為已經 translate 到 this.x, this.y，所以繪製座標為 0, 0
+                ctx.fillText(this.symbol, 0, 0); 
+                
+                ctx.restore();
+            }
+        }
+
+        // 遊戲/動畫循環
+        function loop() {
+            if (showVideo) {
+                // 繪製背景 (將使用者畫面水平翻轉產生鏡像效果)
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                if (video.readyState >= 2) {
+                    ctx.drawImage(video, drawInfo.offsetX, drawInfo.offsetY, drawInfo.drawWidth, drawInfo.drawHeight);
+                }
+                ctx.restore();
+
+                // 為了讓紫色的雨更清楚，加上一層半透明黑色遮罩
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                // 如果不顯示攝影機畫面，繪製從上到下的漸層背景
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                gradient.addColorStop(0, '#000000');
+                gradient.addColorStop(1, '#130076');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // 觸發臉部偵測 (非同步，不阻擋動畫幀)
+            detectFaces();
+
+            // 隨機動態生成數量不等的雨滴
+            const spawnRate = Math.floor(Math.random() * (canvas.width / 150) + 1);
+            for (let i = 0; i < spawnRate; i++) {
+                // 將機率門檻提高到 0.85，讓實際生成的數量進一步減少
+                if (Math.random() > 0.85) {
+                    raindrops.push(new Raindrop());
+                }
+            }
+
+            // 更新並繪製所有細線
+            for (let i = raindrops.length - 1; i >= 0; i--) {
+                const drop = raindrops[i];
+                drop.update();
+                drop.draw();
+
+                // 細線超過畫面範圍之後就會消失
+                if (drop.y > canvas.height || drop.x < 0 || drop.x > canvas.width) {
+                    raindrops.splice(i, 1); // 刪除物件
+                }
+            }
+
+            requestAnimationFrame(loop);
+        }
+    </script>
+</body>
+</html>
