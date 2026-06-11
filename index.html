@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ρ𝑜𝙪я𝕀ภg 𝔯д𝒾ภ</title>
+    <title>𝒎̲̅𝖊аภщ𝒽𝚒ℓ𝕖 𝙞η 𝑻̲̅𝖆𝕚ρ𝐞ɪ</title>
     <style>
         body, html {
             margin: 0;
@@ -63,7 +63,7 @@
 </head>
 <body>
 
-    <button id="start-btn">＄☺〷☄₰☂</button>
+    <button id="start-btn">𝒎̲̅𝖊аภщ𝒽𝚒ℓ𝕖 𝙞η 𝑻̲̅𝖆𝕚ρ𝐞ɪ</button>
     <video id="webcam" playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
 
@@ -190,8 +190,8 @@
             isDetecting = false;
         }
 
-        // 定義會落下來的隨機符號庫
-        const symbolList = "🐱🐱🐱🐱🐱🐶🐶🐶🐶";
+        // 定義會落下來的隨機符號庫 (改成陣列以支援 Emoji)
+        const symbolList = ["🐱", "🐶"];
 
         // 彩色循環雨滴(符號)類別
         class Raindrop {
@@ -200,7 +200,7 @@
                 this.x = Math.random() * canvas.width;
                 this.y = -80; // 將初始高度稍微往上調，避免大符號突然在畫面頂端出現
                 this.size = Math.random() * 30 + 20; // 隨機字體大小 20~50px
-                this.symbol = symbolList.charAt(Math.floor(Math.random() * symbolList.length)); // 隨機挑選一個符號
+                this.symbol = symbolList[Math.floor(Math.random() * symbolList.length)]; // 使用陣列索引隨機挑選一個符號
                 this.speedY = Math.random() * 4 + 3; // 隨機初始下墜速度
                 
                 // 每個符號都會有一點點的方向偏移 (非直直落下)
